@@ -1,35 +1,55 @@
 # JARVIS Android AI Assistant
 
-Native Kotlin/Jetpack Compose Android client plus a Node.js backend. Dashboard modules include AI Chat, Video Generator, App Builder, Website Builder, Code Assistant, Image Generator, My Projects and Settings. Generated app/site/code projects are AI-produced files that can be exported as ZIP. Video and image generation require configured external providers; these are not bundled or free by default.
+## Review status
 
-## Development and run steps
+The source changes implement Android 8.0+ support (minSdk 26), network calls, AI project generation, ZIP transfer through Android's document picker, and video job polling/preview/download for providers following the API contract below. **This repository has not been built or device-tested in this environment. Do not treat this commit as a verified release until you run the checks below.**
 
-1. Install Android Studio (stable), Android SDK 35, JDK 17, Node.js 20+.
-2. In `backend`, copy `.env.example` to `.env`, set `AI_API_KEY` and model details, then `npm install && npm start`.
-3. For emulator testing the default API is `http://10.0.2.2:3000`. For a phone set `JARVIS_API_BASE_URL` in the root `local.properties` to a reachable HTTPS backend URL (or your computer's LAN IP for local testing). Do not use computer `localhost` on the phone.
-4. Open the root folder in Android Studio, sync, then run `app` on your Android device. Chat, coding, image, and project generation require the backend and AI provider.
-5. Create APK: Android Studio > **Build > Build Bundle(s) / APK(s) > Build APK(s)**, or run `gradle :app:assembleDebug`. Output: `app/build/outputs/apk/debug/app-debug.apk`. Copy it to the itel P40 and open it to install (allow installs from that file app when prompted). `adb install -r app/build/outputs/apk/debug/app-debug.apk` also works with USB debugging enabled.
-6. For a distributable release choose **Build > Generate Signed Bundle / APK > APK**, create a signing key and keep it safe/off the repository. Debug builds are for testing.
+## Build and install debug APK (itel P40)
 
-## Feature setup and limitations
+1. Install Android Studio stable, Android SDK Platform 35, and JDK 17. Install Node.js 20+ for backend use.
+2. Clone/download this repository and open its root folder in Android Studio. Wait for Gradle sync; install any prompted SDK components.
+3. Configure the backend URL in root `local.properties` (Android Studio can create it):
 
-- **AI Chat / Code Assistant / App Builder / Website Builder:** OpenAI-compatible Chat Completions backend. Key stays in backend environment. Provider usage can incur charges. App/site source is generated text, not guaranteed to compile or be secure; review and test before use.
-- **ZIP export:** backend assembles only safe, relative file paths and returns a ZIP. Keep generated projects untrusted until reviewed.
-- **AI Video Generator:** set `VIDEO_API_URL` and `VIDEO_API_KEY` for a provider implementing the documented async request contract below. The API must accept JSON `{prompt,duration,aspect_ratio,quality,image_url?}` and return `{id,status?,output_url?}`. Poll `GET {VIDEO_API_URL}/{id}` and return `{status,output_url?,error?}`. Image input must be an HTTPS URL reachable by the provider. Provider usage is usually paid; provider/model availability and duration limits vary.
-- **AI Image Generator:** uses the configured OpenAI-compatible `/images/generations` endpoint; the provider/model must support it and may charge per image.
-- Weather uses Open-Meteo. Time/battery are on-device. Search and app links open external apps/pages.
-- Speech uses Android speech recognition and installed TTS voices; Hindi/English availability depends on the device's recognition/TTS provider. Audio is not uploaded; recognized text is submitted as a chat prompt.
+   ```properties
+   sdk.dir=/absolute/path/to/Android/Sdk
+   JARVIS_API_BASE_URL=https://your-backend.example.com
+   ```
 
-## Backend
+   For Android emulator only, `http://10.0.2.2:3000` is the default. For local phone testing, use the computer's LAN IP and same Wi-Fi; the phone cannot use computer `localhost`. Use HTTPS for production.
+
+4. Build the backend if using AI/weather: in `backend`, copy `.env.example` to `.env`, configure secrets, then run `npm install` and `npm start`. Do not commit `.env` or ship provider keys in the APK.
+5. In Android Studio choose **Build > Build Bundle(s) / APK(s) > Build APK(s)**, or run `gradle :app:assembleDebug` from the root (with Android SDK/JDK configured).
+6. APK path: `app/build/outputs/apk/debug/app-debug.apk`. Copy it to the itel P40. On the phone, open the APK using Files/Downloads, allow **Install unknown apps** for that app when prompted, and install. Alternatively enable USB debugging and use `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
+7. Verify on device: launch JARVIS, test backend health, text chat, weather, mic permission/voice recognition, app shortcuts and project generation/ZIP save. Test video only with a real compatible provider account.
+
+The itel P40 uses Android 12 in common regional variants; the app's minSdk 26 also covers Android 8.0+ devices. Actual installation depends on device storage, OS build, ABI, and successful Gradle compilation.
+
+## AI backend
 
 ```bash
 cd backend
 cp .env.example .env
-# edit .env; never commit it
+# Set AI_API_KEY; optionally change AI_MODEL and AI_BASE_URL
 npm install
 npm start
 ```
 
-Endpoints: `GET /health`, `POST /api/chat`, `POST /api/code`, `POST /api/projects/generate`, `POST /api/projects/zip`, `POST /api/image`, `POST /api/video`, `GET /api/video/:id`, `GET /api/weather?city=Delhi`.
+The backend stores the provider key, not the Android client. AI and image usage may be billed. The sample backend has rate limiting but no user authentication; add authentication/user quotas before public deployment.
 
-Before public deployment use HTTPS, authentication, user-level quotas, billing controls, request logging without secrets, and a secret manager. The built-in rate limiter is not authentication. Never put provider keys in Android resources or BuildConfig.
+## Video provider contract
+
+Configure `VIDEO_API_URL` (job creation endpoint) and `VIDEO_API_KEY` on the backend. Creation must accept JSON `{prompt,duration,aspect_ratio,quality,image_url?}` with bearer auth and return `{id,status?,output_url?}`. Status polling calls `GET VIDEO_API_URL/{id}` with bearer auth; return `{status,output_url?,video_url?,error?}`. Output video must be reachable over HTTPS. Image-to-video requires a public HTTPS image URL. API-specific duration, ratios, image input, quality and billing vary; provider errors are shown in the app.
+
+## API endpoint checks
+
+- `GET /health`
+- `POST /api/chat` `{message,history?}`
+- `POST /api/code` `{prompt}`
+- `POST /api/projects/generate` `{kind:"android"|"website",prompt}`
+- `POST /api/projects/zip` `{files:[{path,content}]}` returns `application/zip`
+- `POST /api/image` `{prompt}` (provider must support images)
+- `POST /api/video` `{prompt,duration,aspect_ratio,quality,image_url?}`
+- `GET /api/video/:id`
+- `GET /api/weather?city=Delhi`
+
+No CI/device build was run by this code edit. Run `node --check backend/server.js` and `npm install`/`npm start`, then test endpoints. Run `gradle :app:assembleDebug` or Android Studio Build APK before claiming a successful build. Generated code is untrusted and must be reviewed before compiling/deploying.
